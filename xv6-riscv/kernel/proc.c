@@ -462,9 +462,18 @@ scheduler(void)
         c->proc = p;
         swtch(&c->context, &p->context);
 
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
+        // Because of direct co_yield switches, the process that 
+        // returned to the scheduler might NOT be 'p'.
+        // c->proc now contains the process that actually returned.
+        struct proc *yielded_p = c->proc;
+        
         c->proc = 0;
+        
+        // Release the lock of the process that actually returned
+        release(&yielded_p->lock);
+        
+        // Skip the normal release(&p->lock) since we handled it above
+        continue;
       }
       release(&p->lock);
     }

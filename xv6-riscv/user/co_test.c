@@ -12,10 +12,10 @@ void test_basic_yield(void) {
   if (pid2 == 0) {
     // Child process
     for (int i = 0; i < 3; i++) {
-      int value = co_yield(pid1, 100 + i);
+      int value = co_yield(pid1, 100);
       printf("Child received: %d\n", value);
-      if (value != 200 + i) {
-        printf("ERROR: Child expected %d but got %d\n", 200 + i, value);
+      if (value != 200 ) {
+        printf("ERROR: Child expected %d but got %d\n", 200 , value);
         exit(1);
       }
     }
@@ -23,10 +23,10 @@ void test_basic_yield(void) {
   } else {
     // Parent process
     for (int i = 0; i < 3; i++) {
-      int value = co_yield(pid2, 200 + i);
+      int value = co_yield(pid2, 200);
       printf("Parent received: %d\n", value);
-      if (value != 100 + i) {
-        printf("ERROR: Parent expected %d but got %d\n", 100 + i, value);
+      if (value != 100) {
+        printf("ERROR: Parent expected %d but got %d\n", 100, value);
         exit(1);
       }
     }

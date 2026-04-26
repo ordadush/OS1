@@ -6,6 +6,8 @@
 #include "spinlock.h"
 #include "proc.h"
 
+extern struct proc proc[NPROC];
+
 uint64
 sys_exit(void)
 {
@@ -94,4 +96,99 @@ uint64
 sys_memsize(void)
 {
   return myproc()->sz;
+}
+
+// Coroutine-style yield: hand off execution to another process
+// Returns the value passed by the target process, or -1 on error
+// 
+// Synchronization strategy without modifying proc struct:
+// - Use chan field to encode waiting state: chan = (void*)(uint64)(1000000 + target_pid)
+// - Use trapframe->a1 to store our outgoing value (so target can retrieve it)
+// - Use trapframe->a0 for the return value (what target sends us)
+//
+// Key insight: If target is already waiting for us, we do DIRECT context switch
+// to bypass the scheduler. Otherwise, we sleep and wait for target to yield to us.
+uint64
+sys_co_yield(void)
+{
+  int target_pid, value;
+  struct proc *p = myproc();
+  struct proc *target = 0;
+  int i;
+  uint64 result;
+
+  // Get arguments: target PID and value to send
+  argint(0, &target_pid);
+  argint(1, &value);
+
+  // Validate arguments
+  if (target_pid <= 0 || target_pid == p->pid) {
+    return -1;
+  }
+
+  // Find the target process
+  for (i = 0; i < NPROC; i++) {
+    if (proc[i].pid == target_pid) {
+      target = &proc[i];
+      break;
+    }
+  }
+
+  // Check if target exists and is not killed
+  if (!target || target->state == UNUSED || target->killed) {
+    return -1;
+  }
+
+  acquire(&p->lock);
+  acquire(&target->lock);
+
+  // Store our outgoing value in a1 so target can retrieve it
+  p->trapframe->a1 = value;
+
+  // Check if target is already waiting for co_yield from us
+  if (target->state == SLEEPING && 
+      target->chan == (void*)(uint64)(1000000 + p->pid)) {
+    // Target IS waiting for us! Do DIRECT context switch.
+    // Send our value to target
+    target->trapframe->a0 = value;
+    p->state = SLEEPING;
+    p->chan = (void*)(uint64)(1000000 + target->pid);
+        
+    target->state = RUNNING;
+    // Update CPU to show target is now running
+    struct cpu *c = mycpu();
+    c->proc = target;
+    
+    release(&p->lock);
+    
+    // Direct context switch: save our context, load target's context
+    // When target later co_yields back to us, it will switch us back here
+    swtch(&p->context, &target->context);
+    
+    // Control returns here when target yields back to us
+    // Retrieve the value target passed to us
+    result = p->trapframe->a0;
+    
+    // Clean up the co_yield waiting marker
+    p->chan = 0;
+    release(&p->lock);
+    return result;
+  }
+
+  // Target is NOT waiting for us, so we must sleep and wait for target to yield to us
+  p->chan = (void*)(uint64)(1000000 + target_pid);
+  p->state = SLEEPING;
+
+  release(&target->lock);
+  
+  swtch(&p->context, &mycpu()->context);
+
+  // After waking up, retrieve the value that target passed to us
+  // Target set our a0 when it made us RUNNABLE
+  result = p->trapframe->a0;
+  
+  // Clean up the co_yield waiting marker
+  p->chan = 0;
+  release(&p->lock);
+  return result;
 }

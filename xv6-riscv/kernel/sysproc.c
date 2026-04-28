@@ -134,16 +134,19 @@ sys_co_yield(void)
     }
   }
 
-  // Check if target exists and is not killed
-  if (!target || target->state == UNUSED || target->killed) {
-    return -1;
+  if (!target) {
+    return -1; // Target process not found
   }
 
   acquire(&p->lock);
   acquire(&target->lock);
 
-  // Store our outgoing value in a1 so target can retrieve it
-  p->trapframe->a1 = value;
+   // Check if target exists and is not killed
+  if (target->state == UNUSED || target->killed || target->state == ZOMBIE ) {
+    release(&target->lock);
+    release(&p->lock);
+    return -1;
+  }
 
   // Check if target is already waiting for co_yield from us
   if (target->state == SLEEPING && 

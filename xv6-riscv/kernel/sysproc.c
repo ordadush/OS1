@@ -152,10 +152,13 @@ sys_co_yield(void)
   if (target->state == SLEEPING && 
       target->chan == (void*)(uint64)(1000000 + p->pid)) {
     // Target IS waiting for us! Do DIRECT context switch.
+    // Read target's stored value before it can be overwritten
+    result = target->trapframe->a1;
     // Send our value to target
     target->trapframe->a0 = value;
     p->state = SLEEPING;
     p->chan = (void*)(uint64)(1000000 + target->pid);
+    p->trapframe->a1 = value;
         
     target->state = RUNNING;
     // Update CPU to show target is now running
@@ -166,12 +169,11 @@ sys_co_yield(void)
     
     // Direct context switch: save our context, load target's context
     // When target later co_yields back to us, it will switch us back here
+    int intena = mycpu()->intena;
     swtch(&p->context, &target->context);
+    mycpu()->intena = intena;
     
     // Control returns here when target yields back to us
-    // Retrieve the value target passed to us
-    result = p->trapframe->a0;
-    
     // Clean up the co_yield waiting marker
     p->chan = 0;
     release(&p->lock);
@@ -179,6 +181,7 @@ sys_co_yield(void)
   }
 
   // Target is NOT waiting for us, so we must sleep and wait for target to yield to us
+  p->trapframe->a1 = value;
   p->chan = (void*)(uint64)(1000000 + target_pid);
   p->state = SLEEPING;
 
